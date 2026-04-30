@@ -1,0 +1,38 @@
+/*
+ * Mise en forme de la navbar (barre de navigation)
+ */
+
+/* Style du conteneur principal de la navbar */
+.navbar {
+  width: 100%;             /* la navbar occupe toute la largeur de la page */
+  background-color: #555;  /* couleur de fond grise */
+  overflow: auto;          /* évite que les éléments flottants débordent du conteneur */
+}
+
+/* Style des liens à l'intérieur de la navbar */
+.navbar a {
+  float: left;             /* aligne les liens côte à côte (de gauche à droite) */
+  text-align: center;      /* centre le texte dans chaque lien */
+  padding: 12px;           /* espace intérieur autour du texte (haut/bas et gauche/droite) */
+  color: white;            /* couleur du texte en blanc */
+  text-decoration: none;   /* supprime le soulignement des liens */
+  font-size: 17px;         /* taille du texte */
+}
+
+/* Style des liens au survol de la souris */
+.navbar a:hover {
+  background-color: #000;  /* fond noir quand la souris passe sur un lien */
+}
+
+/* Style du lien actif (page courante) */
+.active {
+  background-color: #04AA6D; /* fond vert pour indiquer la page sur laquelle on se trouve */
+}
+
+/* Responsive : adaptation sur petits écrans (moins de 500px de large) */
+@media screen and (max-width: 500px) {
+  .navbar a {
+    float: none;    /* annule l'alignement horizontal — les liens se placent les uns sous les autres */
+    display: block; /* chaque lien occupe toute la largeur et passe à la ligne */
+  }
+}

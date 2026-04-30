@@ -16,6 +16,9 @@ En l'état, le projet gère deux pages :
 - `/` → la page d'accueil
 - `/register` → la page d'inscription
 
+Il est aussi connecté à une **base de données MySQL** (`maygourmet`) via Sequelize,
+avec une table `Users` contenant les colonnes `id`, `email` et `password`.
+
 ### Pourquoi le construire comme ça ?
 
 Ce projet n'est pas fait pour être "utile" tout de suite. Son vrai but est d'être une **base solide et réutilisable** : une structure que tu pourras dupliquer et enrichir pour tout futur projet web (blog, boutique, réseau social…).
@@ -73,10 +76,21 @@ MVC impose de **découper le code en trois types de responsabilités** :
 │ vers le bon │     │ quel HTML    │     │ envoyé au  │
 │ contrôleur  │     │ renvoyer     │     │ navigateur │
 └─────────────┘     └──────────────┘     └────────────┘
+                            │
+                            ▼
+                    ┌──────────────┐     ┌────────────┐
+                    │    MODÈLE    │────▶│   MySQL    │
+                    │              │     │            │
+                    │ Sequelize —  │     │ maygourmet │
+                    │ lit/écrit    │     │ table Users│
+                    │ les données  │     │            │
+                    └──────────────┘     └────────────┘
 ```
 
-**Chaque fichier a un rôle unique.** Si tu veux changer l'apparence d'une page : tu touches la vue.
-Si tu veux changer la logique : tu touches le contrôleur. Rien d'autre ne bouge.
+**Chaque fichier a un rôle unique.**
+- Changer l'apparence → toucher la vue
+- Changer la logique → toucher le contrôleur
+- Changer les données → toucher le modèle
 
 ---
 
@@ -87,6 +101,17 @@ nodemvc/
 │
 ├── myserver.js              ← Point d'entrée : démarre le serveur HTTP
 ├── app.js                   ← Configure Express (routes, moteur de vues)
+├── testDB.js                ← Fichier temporaire pour tester Sequelize
+│
+├── config/                  ← Configuration de la base de données
+│   └── database.js          ← Connexion Sequelize → MySQL (maygourmet)
+│
+├── models/                  ← Représentation des tables en JavaScript
+│   └── User.js              ← Modèle de la table Users
+│
+├── public/                  ← Fichiers statiques servis directement
+│   └── css/
+│       └── navbar.css       ← Style de la navbar
 │
 ├── routes/                  ← Associe chaque URL à un contrôleur
 │   ├── accueilRoute.js
@@ -97,6 +122,7 @@ nodemvc/
 │   └── authentificationController.js
 │
 └── views/                   ← Les templates HTML (fichiers .ejs)
+    ├── navbar.ejs            ← Partial réutilisable (inclus dans les autres vues)
     ├── accueil.ejs
     └── register.ejs
 ```
@@ -107,6 +133,9 @@ nodemvc/
 |---|---|---|
 | `myserver.js` | Ouvre la "porte" réseau | La réception d'un immeuble |
 | `app.js` | Plan de l'immeuble, qui va où | Le panneau d'affichage de l'entrée |
+| `config/` | Paramètres de connexion à la BDD | Les clés de l'immeuble |
+| `models/` | Structure des tables en JS | Le plan des archives |
+| `public/` | Fichiers CSS, images, JS front-end | La déco de l'immeuble |
 | `routes/` | Couloirs qui dirigent vers les bons bureaux | Les couloirs |
 | `controllers/` | Les bureaux, où le travail se fait | Les bureaux |
 | `views/` | Les documents remis à la personne | Les documents produits |
@@ -172,8 +201,11 @@ server.listen(PORT, () => { ... });     // ouvre le port réseau
 const express = require("express");
 const app = express();
 
-const accueilRoute         = require("./routes/accueilRoute");
+const accueilRoute          = require("./routes/accueilRoute");
 const authentificationRoute = require("./routes/authentificationRoute");
+
+app.use(express.static("public"));           // sert les fichiers CSS/images depuis public/
+app.use(express.urlencoded({ extended: true })); // lit les données des formulaires POST
 
 app.set("views", "./views");          // dit à Express où trouver les templates
 app.set("view engine", "ejs");        // dit à Express quel moteur utiliser
@@ -185,7 +217,7 @@ module.exports = app;
 ```
 
 **Relation avec les autres fichiers :** importe toutes les routes et les branche sur des chemins.
-C'est ici que tu enregistres chaque nouvelle route quand tu crées une nouvelle section du site.
+C'est ici que tu enregistres chaque nouvelle route et chaque middleware quand le projet grandit.
 
 ---
 
@@ -210,17 +242,19 @@ module.exports = router;
 ### `routes/authentificationRoute.js` — L'aiguilleur de l'auth
 
 ```js
-const express    = require("express");
-const router     = express.Router();
-const authCtrl   = require("../controllers/authentificationController");
+const express  = require("express");
+const router   = express.Router();
+const authCtrl = require("../controllers/authentificationController");
 
-router.get("/register", authCtrl.registerView);  // GET /register → registerView
+router.get("/register",  authCtrl.registerView);  // GET  /register → affiche le formulaire
+router.post("/register", authCtrl.registerUser);  // POST /register → traite l'inscription
 
 module.exports = router;
 ```
 
-**Même structure** qu'`accueilRoute.js`. C'est intentionnel : tous les fichiers de routes
-suivent le même schéma. Facile à lire, facile à dupliquer.
+Deux routes sur la même URL `/register` mais méthodes différentes :
+- `GET` → afficher le formulaire vide
+- `POST` → traiter les données soumises
 
 ---
 
@@ -244,14 +278,122 @@ module.exports = {
 
 ```js
 module.exports = {
+
+    // affiche le formulaire d'inscription
     registerView: (req, res) => {
-        res.render("register");     // envoie views/register.ejs au navigateur
+        res.render("register");
+    },
+
+    // traite les données du formulaire et insère en BDD
+    registerUser: async (req, res) => {
+        const emailUser    = req.body.email;
+        const passwordUser = req.body.motdepasse;
+
+        // validation : champs obligatoires
+        if (!emailUser || !passwordUser) {
+            return res.render('register', { error: "Veuillez compléter tous les champs." });
+        }
+
+        let requeteSql   = "INSERT INTO Users(id, email, password) VALUES(?, ?, ?)";
+        let ordreDonnees = [null, emailUser, passwordUser];
+
+        req.getConnection((errConnexion, connection) => {
+            if (errConnexion) return res.render('register', { error: "Erreur de connexion." });
+
+            connection.query(requeteSql, ordreDonnees, (errRequete, resultat) => {
+                if (errRequete) return res.render('register', { error: "Erreur d'enregistrement." });
+                res.redirect('/');
+            });
+        });
     }
-}
+};
 ```
 
-**Même structure** qu'`accueilController.js`. Plus tard, ce contrôleur contiendra aussi
-`loginView`, `logoutAction`, etc. Tout ce qui touche à l'authentification sera ici.
+`req.getConnection()` est fourni par le middleware `express-myconnection` configuré dans `app.js`.
+Les `?` dans la requête SQL sont des paramètres préparés — protection contre les injections SQL.
+
+---
+
+### `config/database.js` — La connexion à MySQL
+
+```js
+const { Sequelize } = require("sequelize");
+
+const sequelize = new Sequelize("maygourmet", "root", "mot_de_passe", {
+    host: "localhost",
+    dialect: "mysql",
+});
+
+module.exports = sequelize;
+```
+
+**Relation avec les autres fichiers :** importé par chaque modèle dans `models/`.
+Ce fichier est le seul endroit où les identifiants MySQL sont écrits.
+
+Les 3 paramètres de `new Sequelize()` :
+1. `"maygourmet"` → le nom de la base de données
+2. `"root"` → l'utilisateur MySQL
+3. `"mot_de_passe"` → le mot de passe MySQL
+
+---
+
+### `models/User.js` — La table Users en JavaScript
+
+```js
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const User = sequelize.define("User", {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true,
+    },
+    email: {
+        type: DataTypes.STRING(55),
+        allowNull: false,
+        unique: true,
+    },
+    password: {
+        type: DataTypes.STRING(55),
+        allowNull: false,
+    },
+}, {
+    timestamps: false,
+});
+
+module.exports = User;
+```
+
+**Relation avec les autres fichiers :** sert de référence pour `sequelize.sync()`.
+Le contrôleur utilise `req.getConnection()` pour les requêtes SQL brutes directement.
+
+Ce modèle correspond exactement à la table `Users` dans MySQL :
+
+| Modèle JS | Table MySQL |
+|---|---|
+| `id` INTEGER primaryKey autoIncrement | `id` INTEGER PRIMARY KEY auto_increment |
+| `email` STRING(55) | `email` VARCHAR(55) NOT NULL UNIQUE |
+| `password` STRING(55) | `password` VARCHAR(55) NOT NULL |
+| `timestamps: false` | Pas de `createdAt` ni `updatedAt` |
+
+---
+
+### `views/navbar.ejs` — Le partial de navigation
+
+```html
+<div class="navbar">
+    <a href="/">Accueil</a>
+    <a href="/register">Register</a>
+    <a href="/login" class="active">Log in</a>
+</div>
+```
+
+Un **partial** est un fragment de vue réutilisable. On l'inclut dans les autres vues
+avec la syntaxe EJS `<%- include('navbar') %>`.
+
+Le `-` dans `<%-` est important : il injecte le HTML brut sans l'échapper.
+Avec `<%= %>`, les balises HTML seraient affichées comme du texte.
 
 ---
 
@@ -353,24 +495,26 @@ Tu changes **une seule ligne** dans `app.js`. Aucun autre fichier ne bouge.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  VISION       Ce projet est une app web MVC Node.js  │  ← Niveau 1
-│               avec Express et EJS                    │
+│  VISION       App web MVC Node.js + Express + EJS    │  ← Niveau 1
+│               connectée à MySQL via Sequelize        │
 ├──────────────────────────────────────────────────────┤
 │  ARCHI        Route → Contrôleur → Vue               │  ← Niveau 2-3
-│               Chaque couche a une responsabilité     │
+│               Contrôleur → Modèle → MySQL            │
 ├──────────────────────────────────────────────────────┤
 │  STRUCTURE    myserver → app → routes → controllers  │  ← Niveau 4-5
-│               → views                                │
+│               config → models → MySQL                │
 ├──────────────────────────────────────────────────────┤
 │  FICHIERS     Chaque fichier : son rôle, ses imports  │  ← Niveau 6
 │               ses exports, ses liens                 │
 ├──────────────────────────────────────────────────────┤
 │  CODE         require/exports, req/res,              │  ← Niveau 7
 │               res.render, app.use, router.get        │
+│               sequelize.define, DataTypes, sync()    │
 └──────────────────────────────────────────────────────┘
 ```
 
 Quand tu es bloqué sur un problème, situe-le d'abord dans ce tableau.
-Si la page ne s'affiche pas → problème de vue ou de contrôleur (niveau 6).
-Si la route répond pas → problème de routage (niveau 5-6).
-Si le serveur ne démarre pas → problème de configuration (niveau 3-4).
+- La page ne s'affiche pas → problème de vue ou de contrôleur (niveau 6)
+- La route ne répond pas → problème de routage (niveau 5-6)
+- Le serveur ne démarre pas → problème de configuration (niveau 3-4)
+- Les données ne s'enregistrent pas → problème de modèle ou de connexion BDD (niveau 6)

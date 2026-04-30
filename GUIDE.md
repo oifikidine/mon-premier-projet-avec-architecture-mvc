@@ -28,13 +28,16 @@ Cela crée le fichier `package.json` qui décrit ton projet et ses dépendances.
 
 ## Étape 2 — Installer les dépendances
 
-Ce projet utilise deux packages :
+Ce projet utilise cinq packages :
 
 - **express** : framework web pour Node.js
 - **ejs** : moteur de templates HTML
+- **sequelize** : ORM pour parler à la base de données
+- **mysql2** : driver MySQL pour Sequelize et express-myconnection
+- **express-myconnection** : middleware pour accéder à MySQL via `req.getConnection()`
 
 ```bash
-npm install express ejs
+npm install express ejs sequelize mysql2 express-myconnection
 ```
 
 Après l'installation :
@@ -62,10 +65,12 @@ MVC signifie **Modèle — Vue — Contrôleur**. C'est une façon d'organiser s
 
 | Couche | Rôle | Dossier/Fichier |
 |---|---|---|
-| **Modèle** | Données et logique métier | *(non utilisé ici)* |
+| **Modèle** | Données et logique métier | `models/` + Sequelize |
 | **Vue** | Affichage HTML envoyé à l'utilisateur | `views/` |
 | **Contrôleur** | Traite la requête et appelle la vue | `controllers/` |
 | **Route** | Associe une URL à un contrôleur | `routes/` |
+| **Config BDD** | Connexion Sequelize → MySQL | `config/` |
+| **Statiques** | CSS, images, JS front-end | `public/` |
 | **App** | Configure Express | `app.js` |
 | **Serveur** | Démarre le serveur HTTP | `myserver.js` |
 
@@ -201,27 +206,152 @@ module.exports = router;
 
 ---
 
-## Étape 10 — Structure finale du projet
+## Étape 10 — Configurer les middlewares dans `app.js`
+
+Ajoute ces lignes dans `app.js` avant les routes :
+
+```js
+const myConnection = require('express-myconnection');
+
+// connexion MySQL disponible dans tous les contrôleurs via req.getConnection()
+app.use(myConnection(require('mysql2'), {
+    host: "localhost",
+    user: "root",
+    password: "ton_mot_de_passe",
+    database: "maygourmet",
+    port: 3306
+}, 'single'));
+
+// sert les fichiers statiques depuis le dossier public/
+app.use(express.static("public"));
+
+// lit les données envoyées par les formulaires POST
+app.use(express.urlencoded({ extended: true }));
+```
+
+---
+
+## Étape 11 — Créer le dossier `public/` pour les fichiers statiques
+
+Crée la structure suivante :
+
+```
+public/
+└── css/
+    └── navbar.css
+```
+
+Tout fichier dans `public/` est accessible via son chemin sans le mot "public" :
+`public/css/navbar.css` → URL : `/css/navbar.css`
+
+---
+
+## Étape 12 — Créer un partial navbar (`views/navbar.ejs`)
+
+```html
+<div class="navbar">
+    <a href="/">Accueil</a>
+    <a href="/register">Register</a>
+    <a href="/login" class="active">Log in</a>
+</div>
+```
+
+Puis l'inclure dans les autres vues :
+
+```html
+<%- include('navbar') %>
+```
+
+---
+
+## Étape 13 — Configurer Sequelize (`config/database.js`)
+
+```js
+const { Sequelize } = require("sequelize");
+
+const sequelize = new Sequelize("maygourmet", "root", "mot_de_passe", {
+    host: "localhost",
+    dialect: "mysql",
+});
+
+module.exports = sequelize;
+```
+
+---
+
+## Étape 14 — Créer le modèle User (`models/User.js`)
+
+```js
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const User = sequelize.define("User", {
+    email: {
+        type: DataTypes.STRING(55),
+        allowNull: false,
+        unique: true,
+    },
+    password: {
+        type: DataTypes.STRING(55),
+        allowNull: false,
+    },
+});
+
+module.exports = User;
+```
+
+---
+
+## Étape 15 — Synchroniser les modèles avec MySQL (`testDB.js`)
+
+```js
+const sequelize = require("./config/database");
+const User = require("./models/User");
+
+sequelize.sync({ force: false })
+    .then(() => console.log("Tables synchronisées !"))
+    .catch((erreur) => console.log("Erreur :", erreur));
+```
+
+```bash
+node testDB.js
+```
+
+---
+
+## Étape 16 — Structure finale du projet
 
 ```
 nodemvc/
+├── config/
+│   └── database.js
 ├── controllers/
-│   └── accueilController.js
+│   ├── accueilController.js
+│   └── authentificationController.js
+├── models/
+│   └── User.js
+├── public/
+│   └── css/
+│       └── navbar.css
 ├── routes/
-│   └── accueilRoute.js
+│   ├── accueilRoute.js
+│   └── authentificationRoute.js
 ├── views/
-│   └── accueil.ejs
+│   ├── navbar.ejs
+│   ├── accueil.ejs
+│   └── register.ejs
 ├── node_modules/         ← généré par npm, ne pas versionner
 ├── .gitignore
 ├── app.js
 ├── myserver.js
+├── testDB.js
 ├── package.json
 └── package-lock.json
 ```
 
 ---
 
-## Étape 11 — Lancer l'application
+## Étape 17 — Lancer l'application
 
 ```bash
 node myserver.js

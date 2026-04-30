@@ -3,9 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Register</title>
 </head>
 <body>
-    <h1>Bienvenue dans Register</h1>
+
+    <%- include('navbar') %>
+
+    <h1>Athentification </h1>
+
+    <form action="/register" method="post">
+        <div class="containaer">
+            <h3> S'enregistrer</h3>
+            <p>veuillez compléter tous les champs</p>
+            <hr> <!-- Insérer une ligne horizontale -->
+
+            <label for="email">Email</label>
+            <input type="email" name="email" id="email" required>
+
+            <!-- Zone de saisie du mot de passe -->
+             <label for="motdepasse">Mot de passe</label>
+             <input type="password" name="motdepasse" id="motdepasse" required>
+
+             <button type="submit">Enregistrer</button>
+
+        </div>
+    </form>
+
 </body>
 </html>
